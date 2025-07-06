@@ -1,11 +1,20 @@
 ﻿from enum import Enum, auto
 
 class State(Enum):
-    free = auto()
-    list = auto()
-    code = auto()
-    table = auto()
-    quote = auto()
+    free = auto()  # 文本
+    list = auto()  # 列表
+    code = auto()  # 代码块
+    table = auto()  # 表格
+    quote = auto()  # 引用
+
+class InlineState(Enum):
+    wait = auto()
+    label = auto()
+    text = auto()
+
+class InlineType(Enum):
+    label = auto()
+    end = auto()
 
 class Type(Enum):
     heading = auto()
@@ -13,6 +22,8 @@ class Type(Enum):
     code = auto()
     table = auto()
     quote = auto()
+    inline = auto()
+    paragraph = auto()
 
 class TokenParser():
     def __init__(self):
@@ -21,6 +32,7 @@ class TokenParser():
         self.state = State.free
         self.global_align = "left"
 
+        self.temp_slice = None  # 开始
     def tokenize(self, texts:str):
         """
         按行分割,逐行解析
@@ -44,18 +56,36 @@ class TokenParser():
                 elif line in (mapping := {"[list]":State.list,"[code]":State.code,"[table]":State.table,"[quote]":State.quote}):
                     # ("[list]","[code]","[table]","[quote]")
                     self.state = mapping[line]
-                    self.temp_token.extend((Type(self.state.value + 1),[]))  # Type=State+1
+                    self.temp_token.extend((Type(self.state.value),[]))
                 # 行结构
-                else:
+                elif '[' in line and ':' in line and ']' in line:
+                    # 初始化token
+                    self.temp_token.extend((Type.inline,[self.global_align]))
+
                     row_index = 0
                     row_len = len(line)
                     while row_index < row_len:
                         char = line[row_index]  # 遍历每行
-                        print(char)
+                        # free -> label -> wait -> text -> wait
+                        if self.state == State.free:
+                            if char == '[':
+                                self.state = InlineState.label
+                        elif self.state in (InlineState.label,InlineState.text):
+                            self.state = InlineState.wait
+                            self.temp_slice = row_index
+                        elif self.state == InlineState.wait:
+                            if char == ':':
+                                self.state = InlineState.text
+                                self.temp_token.append((InlineType.label,line[self.temp_slice:row_index]))
+                            elif char == ']':
+                                self.state = State.free
+                                self.temp_token.extend((line[self.temp_slice:row_index],InlineType.end))
+                                self.token.append(tuple(self.temp_token))
                         # todo:行内结构分析
                         row_index += 1
-
-
+                    self.temp_token = []
+                else:
+                    self.token.append((Type.paragraph,[self.global_align],line))
             # 状态机
             elif line == "[end]":
                 # 释放状态
@@ -73,6 +103,7 @@ doc = """[heading1:wosk]
 [paragraph>]
 线性模型没那本事
 [paragraph<]
+[test:测试]
 [list]
 -一级
     -二级

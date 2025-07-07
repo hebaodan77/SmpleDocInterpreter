@@ -28,7 +28,7 @@ class Type(Enum):
 class TokenParser():
     def __init__(self):
         self.token = []  # 最终结果
-        self.temp_token = []  # 构造区 token模型:(标签,[参1,参2,...],文本)
+        self.temp_token = []  # 构造区 token模型:(标签,[参1,参2,...],*文本)
         self.state = State.free
         self.global_align = "left"
 

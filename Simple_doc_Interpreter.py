@@ -7,14 +7,10 @@ class State(Enum):
     table = auto()  # 表格
     quote = auto()  # 引用
 
-class InlineState(Enum):
-    wait = auto()
-    label = auto()
-    text = auto()
-
 class InlineType(Enum):
     label = auto()
     end = auto()
+
 
 class Type(Enum):
     heading = auto()
@@ -24,7 +20,7 @@ class Type(Enum):
     quote = auto()
     inline = auto()
     paragraph = auto()
-
+doc = '''这是[underline;color(red,green):一个]简单的[bold:行内[color('red'):标[text:记]]]'''
 class TokenParser():
     def __init__(self):
         self.token = []  # 最终结果
@@ -33,6 +29,50 @@ class TokenParser():
         self.global_align = "left"
 
         self.temp_slice = None  # 开始
+
+    def inline_parser(self, line:str):  # note:1最简单的[:]完成 2.[:][:]完成 3.[:[:]]完成
+        temp = []
+        state = "text"  # 初始化
+        marked_index = 0 # 初始化
+        current_index = 0 # 初始化
+        label_num = []
+        line_length = len(line)
+        while line_length > current_index:
+            char = line[current_index]
+            if char == '[':
+                if state == "text":  # 标记标签开始
+                    state = '['
+                    text = line[marked_index:current_index]
+                    temp.append(text)
+                    marked_index = current_index + 1
+                elif state == ':':
+                    state = '['
+                    text = line[marked_index:current_index]
+                    temp.append(text)
+                    marked_index = current_index + 1
+            elif char == ':':
+                if state == '[':  # 标记标签结束
+                    state = ':'
+                    labels = line[marked_index:current_index].split(';')
+                    temp.extend((InlineType.label,i) for i in labels)
+                    label_num.append(len(labels))# 记录labeltype数量,便于后期闭合
+                    marked_index = current_index + 1
+            elif char == ']':
+                if state == ':':  # 标记一个行内标记结束
+                    state = "text"
+                    text = line[marked_index:current_index]
+                    temp.append(text)
+                    temp.extend((InlineType.end,) * label_num.pop()) # 闭合label,需配合labeltype数量
+                    marked_index = current_index + 1
+                elif state == "text":
+                    text = line[marked_index:current_index]
+                    temp.append(text)
+                    temp.extend((InlineType.end,) * label_num.pop()) # 闭合label,需配合labeltype数量
+                    marked_index = current_index + 1
+
+            current_index += 1
+        return temp
+    
     def tokenize(self, texts:str):
         """
         按行分割,逐行解析
@@ -49,41 +89,17 @@ class TokenParser():
                     align = {"<":"left",">":"right","^":"center"}.get(line[9])
                     size = line[8]
                     text = line[10 if align else 9:-1]
-                    self.token.append((Type.heading,[align,size],text))
+                    self.token.append((Type.heading,[align,size],self.inline_parser(text)))
                 elif line.startswith("[paragraph") and line[-1] == "]":
                     # [paragraph<]
                     self.global_align = {"<":"left",">":"right","^":"center"}.get(line[10])
                 elif line in (mapping := {"[list]":State.list,"[code]":State.code,"[table]":State.table,"[quote]":State.quote}):
                     # ("[list]","[code]","[table]","[quote]")
                     self.state = mapping[line]
-                    self.temp_token.extend((Type(self.state.value),[]))
+                    self.temp_token.extend((Type(self.state.value),[]))  # hack:能运行,且结果正确,但不知道原理(冒汗)
                 # 行结构
                 elif '[' in line and ':' in line and ']' in line:
-                    # 初始化token
-                    self.temp_token.extend((Type.inline,[self.global_align]))
-
-                    row_index = 0
-                    row_len = len(line)
-                    while row_index < row_len:
-                        char = line[row_index]  # 遍历每行
-                        # free -> label -> wait -> text -> wait
-                        if self.state == State.free:
-                            if char == '[':
-                                self.state = InlineState.label
-                        elif self.state in (InlineState.label,InlineState.text):
-                            self.state = InlineState.wait
-                            self.temp_slice = row_index
-                        elif self.state == InlineState.wait:
-                            if char == ':':
-                                self.state = InlineState.text
-                                self.temp_token.append((InlineType.label,line[self.temp_slice:row_index]))
-                            elif char == ']':
-                                self.state = State.free
-                                self.temp_token.extend((line[self.temp_slice:row_index],InlineType.end))
-                                self.token.append(tuple(self.temp_token))
-                        # todo:行内结构分析
-                        row_index += 1
-                    self.temp_token = []
+                    self.token.append((Type.inline,[self.global_align],self.inline_parser(line)))
                 else:
                     self.token.append((Type.paragraph,[self.global_align],line))
             # 状态机
@@ -99,19 +115,7 @@ class TokenParser():
 
             line_index += 1
 
-doc = """[heading1:wosk]
-[paragraph>]
-线性模型没那本事
-[paragraph<]
-[test:测试]
-[list]
--一级
-    -二级
-    -二级
--一级
-[end]
-"""
 tokenparser = TokenParser()
 tokenparser.tokenize(doc)
-print(*tokenparser.token, sep="\n")
-print(tokenparser.global_align)
+token_list = tokenparser.token
+print(token_list,sep='\n')
